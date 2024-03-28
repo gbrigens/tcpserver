@@ -3,70 +3,94 @@ package main
 import (
     "bufio"
     "flag"
-    "fmt"
+    "log"
     "net"
+    "os"
     "sync"
+    "time"
 )
 
 var (
+    // Server configuration variables
+    maxConnections int
+    port           string
+
     clients = make(map[net.Conn]struct{})
-    mutex   = &sync.Mutex{}
+    rwMutex = &sync.RWMutex{}
+
+    logger = log.New(os.Stdout, "server: ", log.LstdFlags)
 )
 
+func init() {
+    flag.IntVar(&maxConnections, "max", 300, "maximum number of concurrent connections")
+    flag.StringVar(&port, "port", "12345", "port to listen on")
+}
+
 func main() {
-    var port string
-    flag.StringVar(&port, "port", "3001", "port to listen on")
     flag.Parse()
 
     listener, err := net.Listen("tcp", ":"+port)
     if err != nil {
-        panic(err)
+        logger.Fatalf("Failed to start server on port %s: %s", port, err)
     }
     defer listener.Close()
-    fmt.Printf("Server started on port %s\n", port)
+    logger.Printf("Server started on port %s, max connections: %d\n", port, maxConnections)
 
+    var connections int
     for {
-        conn, err := listener.Accept()
-        if err != nil {
-            fmt.Println("Error accepting connection:", err)
+        if connections >= maxConnections {
+            logger.Println("Maximum connections reached, new connections will be temporarily refused.")
+            time.Sleep(10 * time.Second)
             continue
         }
 
-        mutex.Lock()
-        clients[conn] = struct{}{}
-        mutex.Unlock()
+        conn, err := listener.Accept()
+        if err != nil {
+            logger.Printf("Error accepting connection: %s", err)
+            continue
+        }
+        conn.SetDeadline(time.Now().Add(15 * time.Minute)) // Set a 15 minute timeout
 
-        go handleConnection(conn)
+        rwMutex.Lock()
+        clients[conn] = struct{}{}
+        connections = len(clients)
+        rwMutex.Unlock()
+
+        go handleConnection(conn, &connections)
     }
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, connections *int) {
     defer conn.Close()
     reader := bufio.NewReader(conn)
 
     for {
         message, err := reader.ReadString('\n')
         if err != nil {
-            mutex.Lock()
+            logger.Printf("Connection error from %v: %s", conn.RemoteAddr(), err)
+            rwMutex.Lock()
             delete(clients, conn)
-            mutex.Unlock()
-            break
+            *connections = len(clients)
+            rwMutex.Unlock()
+            return
         }
 
-        fmt.Print("Message received:", message)
+        logger.Printf("Message received from %v: %s", conn.RemoteAddr(), message)
         broadcastMessage(message, conn)
     }
 }
 
 func broadcastMessage(message string, origin net.Conn) {
-    mutex.Lock()
-    defer mutex.Unlock()
+    rwMutex.RLock()
+    defer rwMutex.RUnlock()
     for conn := range clients {
         if conn != origin {
-            conn.Write([]byte(message))
+            go func(c net.Conn) {
+                _, err := c.Write([]byte(message))
+                if err != nil {
+                    logger.Printf("Broadcast error to %v: %s", c.RemoteAddr(), err)
+                }
+            }(conn)
         }
     }
 }
-
-// Navigate to the directory of server.go
-// You can run `go run server.go` or to specify a different port, use the -port flag `go run server.go -port=8080`
