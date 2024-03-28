@@ -11,14 +11,11 @@ import (
 )
 
 var (
-    // Server configuration variables
     maxConnections int
     port           string
-
-    clients = make(map[net.Conn]struct{})
-    rwMutex = &sync.RWMutex{}
-
-    logger = log.New(os.Stdout, "server: ", log.LstdFlags)
+    clients        = make(map[net.Conn]struct{})
+    rwMutex        = &sync.RWMutex{}
+    logger         = log.New(os.Stdout, "server: ", log.LstdFlags)
 )
 
 func init() {
@@ -49,7 +46,7 @@ func main() {
             logger.Printf("Error accepting connection: %s", err)
             continue
         }
-        conn.SetDeadline(time.Now().Add(15 * time.Minute)) // Set a 15 minute timeout
+        conn.SetDeadline(time.Now().Add(15 * time.Minute))
 
         rwMutex.Lock()
         clients[conn] = struct{}{}
@@ -81,14 +78,15 @@ func handleConnection(conn net.Conn, connections *int) {
 }
 
 func broadcastMessage(message string, origin net.Conn) {
-    rwMutex.RLock()
-    defer rwMutex.RUnlock()
+    rwMutex.Lock()
+    defer rwMutex.Unlock()
     for conn := range clients {
         if conn != origin {
             go func(c net.Conn) {
                 _, err := c.Write([]byte(message))
                 if err != nil {
                     logger.Printf("Broadcast error to %v: %s", c.RemoteAddr(), err)
+                    delete(clients, c)
                 }
             }(conn)
         }
