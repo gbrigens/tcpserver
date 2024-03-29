@@ -7,7 +7,7 @@
 ## Running the Server
 
 1. Clone the repo and navigate to the server directory.
-2. Run `go run server.go` to start the server on the default port (3001).
+2. Run `go run server.go` to start the server on the default port (12345).
 3. Use `-port=8080` to specify a different port `go run server.go -port=8080`.
 4. Use `-max=100` to set the maximum connections `go run server.go -port=8080 -max=100`.
 
